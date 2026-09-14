@@ -17,8 +17,8 @@ GURUHDA:
 - Kimdir xabarida OWNER_NAME tilga olinsa (masalan "sarvar") - OWNER'ga xabar beriladi.
 - OWNER /offline holatida bo'lsa, bot vaqti-vaqti bilan (job_queue orqali)
   guruhlarga o'zi qiziqarli xabar/stiker yuborib, guruhni faol tutadi.
+- Har kuni ertalab va kechqurun avtomatik salom/tilak yuboradi.
 
-  
 Buyruqlar (faqat OWNER uchun, shaxsiy chatda):
   /online    - statusni "online" qilish
   /offline   - statusni "offline" qilish (auto-javoblar + guruh faolligi yoqiladi)
@@ -31,6 +31,7 @@ import json
 import logging
 import random
 import os
+import datetime
 
 from telegram import Update
 from telegram.constants import ChatType
@@ -51,6 +52,11 @@ STORAGE_FILE = "storage.json"
 GROUP_REPLY_CHANCE = 0.20                 # guruhda tasodifiy javob berish ehtimoli (0.20 = 20%)
 GROUP_ACTIVITY_INTERVAL_SEC = 2 * 60 * 60 # har 2 soatda guruhni "jonlantirish" urinishi
 GROUP_ACTIVITY_CHANCE = 0.5               # har urinishda har bir guruhga yuborish ehtimoli
+
+# O'zbekiston vaqti (UTC+5)
+TASHKENT_TZ = datetime.timezone(datetime.timedelta(hours=5))
+MORNING_TIME = datetime.time(hour=7, minute=30, tzinfo=TASHKENT_TZ)   # ertalabki salom vaqti
+EVENING_TIME = datetime.time(hour=22, minute=0, tzinfo=TASHKENT_TZ)   # kechqurungi tilak vaqti
 # ==========================================
 
 logging.basicConfig(
@@ -92,6 +98,22 @@ GROUP_ACTIVITY_MESSAGES = [
     "Zerikish taqiqlanadi bu guruhda! 🚫😴 Kim qiziq voqea aytadi?",
     "Jarvis faollik nazoratchisi sifatida: gaplashish vaqti keldi! 🔥🗣️",
     "Salom, jamoa! 🤖 Bugun eng kulgili voqeani kim aytadi? 😂",
+]
+
+MORNING_MESSAGES = [
+    "Assalomu alaykum, hurmatli jamoa! ☀️ Yangi kun boshlandi, kayfiyatlar zo'r bo'lsin! 🌅💪",
+    "Xayrli tong! 🌞 Bugun ham ajoyib kun bo'lsin, barchaga omad va yaxshi kayfiyat! ☕😄",
+    "Tong yorishdi! 🌄 Barchaga baraka va yaxshi kunlar tilaymiz! 🙌✨",
+    "Salom, quyoshli jamoa! ☀️ Yangi kun - yangi imkoniyatlar. Omad hammaga! 🚀😊",
+    "Xayrli tong! 🌅 Choy-qahvangiz shirin, kuningiz baraka bilan to'lsin! ☕🎉",
+]
+
+EVENING_MESSAGES = [
+    "Hayrli kech, hurmatli jamoa! 🌙 Bugungi kun uchun rahmat, yaxshi dam oling! 😴✨",
+    "Kech kirdi 🌆 Bugun ham zo'r kun bo'ldi, ertaga yana ko'rishguncha! 👋🌟",
+    "Hayrli kech! 🌃 Charchagan bo'lsangiz, endi dam olish vaqti keldi 😌💤",
+    "Kun tugadi, xayrli kech hammaga! 🌙 Tinch tunlar tilaymiz 🌌😊",
+    "Hayrli kech! 🌆 Ertangi kun yanada yaxshiroq bo'lsin, hozircha dam oling 😴🌙",
 ]
 
 EMOJIS = ["🤖", "🔥", "😄", "🎉", "👋", "😎", "✨", "🚀", "😂", "👀", "💬", "📩"]
@@ -311,6 +333,30 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_sticker(chat_id=update.effective_chat.id, sticker=sticker)
 
 
+async def morning_greeting_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har kuni ertalab barcha guruhlarga salom yuboradi."""
+    text = random.choice(MORNING_MESSAGES)
+    for chat_id in storage["groups"]:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+            if storage["stickers"]:
+                await context.bot.send_sticker(chat_id=chat_id, sticker=random.choice(storage["stickers"]))
+        except Exception as e:
+            logger.warning("Ertalabki salomni yuborib bo'lmadi (%s): %s", chat_id, e)
+
+
+async def evening_greeting_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har kuni kechqurun barcha guruhlarga hayrli kech tilaydi."""
+    text = random.choice(EVENING_MESSAGES)
+    for chat_id in storage["groups"]:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+            if storage["stickers"]:
+                await context.bot.send_sticker(chat_id=chat_id, sticker=random.choice(storage["stickers"]))
+        except Exception as e:
+            logger.warning("Kechqurungi tilakni yuborib bo'lmadi (%s): %s", chat_id, e)
+
+
 async def group_activity_job(context: ContextTypes.DEFAULT_TYPE):
     """Vaqti-vaqti bilan guruhlarni 'jonlantirish' uchun ishga tushadi."""
     if storage["status"] != "offline":
@@ -357,6 +403,10 @@ def main():
 
     # Guruhlarni vaqti-vaqti bilan "jonlantirish" uchun
     app.job_queue.run_repeating(group_activity_job, interval=GROUP_ACTIVITY_INTERVAL_SEC, first=120)
+
+    # Har kuni ertalab va kechqurun avtomatik salom/tilak
+    app.job_queue.run_daily(morning_greeting_job, time=MORNING_TIME)
+    app.job_queue.run_daily(evening_greeting_job, time=EVENING_TIME)
 
     logger.info("Jarvis ishga tushdi 🤖")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
